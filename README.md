@@ -19,10 +19,50 @@
 
 | 파일 | 역할 |
 |------|------|
-| `office-socks.js` | SOCKS5(CONNECT) 프록시 본체. 기본 `0.0.0.0:1080`, tailnet(100.64.0.0/10)+localhost 만 허용 |
+| `office-socks.js` | SOCKS5(CONNECT) 프록시 본체 |
 | `start.cmd` | 죽으면 3초 후 자동 재시작하는 무한 루프 래퍼 (Windows) |
+| `config.example.json` | 접근제어 설정 템플릿. `config.json` 으로 복사해 사용(git 제외됨) |
 
-환경변수: `PROXY_HOST`(기본 `0.0.0.0`), `PROXY_PORT`(기본 `1080`).
+환경변수: `PROXY_HOST`, `PROXY_PORT`, `PROXY_TOKEN`(auth 비번), `PROXY_CONFIG`(설정 파일 경로).
+
+---
+
+## 접근 제어 (`config.json`)
+
+`office-socks.js` 옆의 `config.json` 을 읽고 **핫리로드**한다(3초 폴링 — 껐다 켤 필요 없이
+토글 반영). **파일이 없으면 기본값**: tailnet 전용 + 무인증 + fail2ban on (원래 동작 그대로).
+
+적용 순서: **① ban 체크 → ② tailnet 신뢰(무인증) → ③ 화이트리스트 → ④ 토큰 인증**
+
+```jsonc
+{
+  "port": 1080,
+  "tailnet": { "allow": true },          // tailnet(100.64/10)+localhost 는 무인증 통과. Studio 는 늘 여기.
+  "auth": {                               // non-tailnet 소스에 SOCKS5 user/pass 요구
+    "enabled": true,
+    "username": "office",
+    "password": ""                        // 비우고 PROXY_TOKEN 환경변수로 주입 권장(git 유출 방지)
+  },
+  "whitelist": {                          // 켜면 목록 IP만 접속 가능(non-tailnet). off 면 무시.
+    "enabled": true,
+    "entries": ["10.10.10.*", "203.0.113.5", "198.51.100.0/24"]  // 와일드카드 / 정확IP / CIDR
+  },
+  "fail2ban": {                           // 토큰 실패 누적 시 그 IP 차단
+    "enabled": true,
+    "maxFails": 5,      // windowSec 안에 이만큼 실패하면
+    "windowSec": 600,
+    "banSec": 3600      // 이 시간 동안 밴
+  }
+}
+```
+
+- **tailnet 은 언제나 무인증** (auth/whitelist 켜도 Studio 등 tailnet 기기는 토큰 불필요).
+  tailnet 도 인증 걸려면 `"tailnet": { "allow": false }`.
+- **화이트리스트 항목**: `10.10.10.*`(와일드카드) · `203.0.113.5`(정확) · `198.51.100.0/24`(CIDR).
+- **토큰 인증**: SOCKS5 user/pass(RFC1929). 브라우저 자동화는 `socks5://user:pass@host:port`
+  또는 Playwright `proxy:{server,username,password}`. curl 은 `--socks5-hostname user:pass@host:port`.
+- **공인망에 포트를 열 때만** auth/whitelist 가 의미 있다. 그럴 땐 **강한 랜덤 토큰 + 가능하면
+  화이트리스트 병행 + 비표준 포트**를 함께 쓸 것. tailnet 으로 붙을 수 있으면 그냥 tailnet 이 낫다.
 
 ---
 

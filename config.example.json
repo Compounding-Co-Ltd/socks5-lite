@@ -1,0 +1,20 @@
+{
+  "host": "0.0.0.0",
+  "port": 1080,
+  "tailnet": { "allow": true },
+  "auth": {
+    "enabled": false,
+    "username": "office",
+    "password": "여기에-길고-랜덤한-토큰 (또는 PROXY_TOKEN 환경변수로 주입 권장)"
+  },
+  "whitelist": {
+    "enabled": false,
+    "entries": ["10.10.10.*", "203.0.113.5", "198.51.100.0/24"]
+  },
+  "fail2ban": {
+    "enabled": true,
+    "maxFails": 5,
+    "windowSec": 600,
+    "banSec": 3600
+  }
+}
