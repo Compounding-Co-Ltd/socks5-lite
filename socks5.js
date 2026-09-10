@@ -1,12 +1,12 @@
-// office-socks.js — zero-dependency SOCKS5 (CONNECT) proxy for the office box.
+// socks5.js — a very lightweight, zero-dependency SOCKS5 (CONNECT) proxy.
 //
-// Egress goes out this machine's network (office public IP). Access control, in order:
+// Traffic sent through it egresses via this host's own network. Access control, in order:
 //   1) ban check     — fail2ban: IPs with too many auth failures are blocked for a while
-//   2) tailnet       — sources in 100.64.0.0/10 (+localhost) are trusted → no auth
+//   2) trusted CIDRs — sources in the trusted ranges (+localhost) are allowed with no auth
 //   3) whitelist     — (optional, toggleable) only listed IPs/CIDR/wildcards may proceed
-//   4) auth (token)  — (optional) non-tailnet sources must pass SOCKS5 user/pass (RFC1929)
+//   4) auth (token)  — (optional) other sources must pass SOCKS5 user/pass (RFC 1929)
 //
-// Defaults (no config.json) reproduce the original behavior: tailnet-only, no auth.
+// With no config.json present the defaults are: trusted-CIDR-only, no auth, fail2ban on.
 // Config is read from config.json next to this file (or $PROXY_CONFIG) and hot-reloaded.
 'use strict';
 const net = require('net');
@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 
 const CONFIG_PATH = process.env.PROXY_CONFIG || path.join(__dirname, 'config.json');
+const DEFAULT_TRUSTED = ['100.64.0.0/10']; // CGNAT/private overlay range; override via config
 
 function loadConfig() {
   let c = {};
@@ -21,14 +22,18 @@ function loadConfig() {
   const auth = c.auth || {};
   const wl = c.whitelist || {};
   const f2b = c.fail2ban || {};
+  const tr = c.trusted || {};
   return {
     host: process.env.PROXY_HOST || c.host || '0.0.0.0',
     port: parseInt(process.env.PROXY_PORT || c.port || 1080, 10),
-    // tailnet 은 신뢰 네트워크 — 기본 무인증 허용(Studio 등). false 로 끄면 tailnet 도 auth/whitelist 적용.
-    tailnetAllow: c.tailnet ? c.tailnet.allow !== false : true,
+    // 신뢰 네트워크 — 여기서 오는 연결은 무인증 통과. 기본값은 CGNAT/사설 오버레이 대역.
+    trusted: {
+      allow: tr.allow !== false,
+      cidrs: Array.isArray(tr.cidrs) && tr.cidrs.length ? tr.cidrs : DEFAULT_TRUSTED,
+    },
     auth: {
       enabled: !!auth.enabled,
-      username: auth.username || process.env.PROXY_USER || 'office',
+      username: auth.username || process.env.PROXY_USER || 'user',
       password: process.env.PROXY_TOKEN || auth.password || '',
     },
     whitelist: {
@@ -61,12 +66,6 @@ function ipToLong(ip) {
   if (!m) return null;
   return (((+m[1]) * 256 + (+m[2])) * 256 + (+m[3])) * 256 + (+m[4]);
 }
-function inTailnet(ip) {
-  const m = /^(\d+)\.(\d+)\./.exec(ip);
-  if (!m) return false;
-  const a = +m[1], b = +m[2];
-  return a === 100 && b >= 64 && b <= 127; // 100.64.0.0/10
-}
 function matchEntry(ip, entry) {
   entry = String(entry).trim();
   if (!entry) return false;
@@ -84,6 +83,7 @@ function matchEntry(ip, entry) {
   }
   return entry === ip;                              // exact
 }
+function inTrusted(ip) { return CFG.trusted.cidrs.some((c) => matchEntry(ip, c)); }
 function inWhitelist(ip) { return CFG.whitelist.entries.some((e) => matchEntry(ip, e)); }
 
 // ─── fail2ban ───────────────────────────────────────────────────────────────
@@ -115,8 +115,8 @@ setInterval(() => {
 // 'noauth' = 통과(무인증), 'auth' = SOCKS5 user/pass 요구, 'reject' = 즉시 차단
 function gate(ip) {
   if (isBanned(ip)) return 'reject';
-  const trustedTailnet = CFG.tailnetAllow && (inTailnet(ip) || ip === '127.0.0.1' || ip === '::1');
-  if (trustedTailnet) return 'noauth';
+  const trusted = CFG.trusted.allow && (inTrusted(ip) || ip === '127.0.0.1' || ip === '::1');
+  if (trusted) return 'noauth';
   if (CFG.whitelist.enabled && !inWhitelist(ip)) return 'reject';
   if (CFG.auth.enabled) return 'auth';
   return 'noauth'; // whitelist 통과(또는 비활성) + auth 비활성
@@ -213,6 +213,6 @@ const server = net.createServer((client) => {
 
 server.on('error', (e) => { log('SERVER ERROR', e.message); process.exit(1); });
 server.listen(CFG.port, CFG.host, () => log(
-  `SOCKS5 on ${CFG.host}:${CFG.port} | tailnet=${CFG.tailnetAllow} auth=${CFG.auth.enabled} ` +
-  `whitelist=${CFG.whitelist.enabled}(${CFG.whitelist.entries.length}) fail2ban=${CFG.fail2ban.enabled}`,
+  `SOCKS5 on ${CFG.host}:${CFG.port} | trusted=${CFG.trusted.allow}(${CFG.trusted.cidrs.length}) ` +
+  `auth=${CFG.auth.enabled} whitelist=${CFG.whitelist.enabled}(${CFG.whitelist.entries.length}) fail2ban=${CFG.fail2ban.enabled}`,
 ));

@@ -1,10 +1,10 @@
 {
   "host": "0.0.0.0",
   "port": 1080,
-  "tailnet": { "allow": true },
+  "trusted": { "allow": true, "cidrs": ["100.64.0.0/10"] },
   "auth": {
     "enabled": false,
-    "username": "office",
+    "username": "user",
     "password": "여기에-길고-랜덤한-토큰 (또는 PROXY_TOKEN 환경변수로 주입 권장)"
   },
   "whitelist": {
