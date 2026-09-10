@@ -108,11 +108,15 @@ setInterval(() => {
 // ─── access decision ──────────────────────────────────────────────────────────
 function gate(ip) {
   if (isBanned(ip)) return 'reject';
-  const trusted = CFG.trusted.allow && (inTrusted(ip) || ip === '127.0.0.1' || ip === '::1');
-  if (trusted) return 'noauth';
-  if (CFG.whitelist.enabled && !inWhitelist(ip)) return 'reject';
+  // 신뢰 CIDR/localhost → 무인증
+  if (CFG.trusted.allow && (inTrusted(ip) || ip === '127.0.0.1' || ip === '::1')) return 'noauth';
+  // 화이트리스트에 있으면 무인증 지름길
+  if (CFG.whitelist.enabled && inWhitelist(ip)) return 'noauth';
+  // 그 외는 토큰 인증(켜져 있으면)
   if (CFG.auth.enabled) return 'auth';
-  return 'noauth';
+  // 비신뢰 + 화이트리스트 미매칭 + auth off → **기본 차단.**
+  // (열려면 trusted.cidrs / whitelist / auth 중 하나를 명시적으로 설정해야 한다)
+  return 'reject';
 }
 
 function pipeConnect(client, host, port, pre, onOk, onFail) {
