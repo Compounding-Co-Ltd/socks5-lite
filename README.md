@@ -1,17 +1,23 @@
 # socks5-lite
 
-**매우 가벼운, 의존성 0짜리 SOCKS5 프록시.** Node.js 표준 모듈만 쓴다(npm 설치 없음).
+**매우 가벼운, 의존성 0짜리 SOCKS5 + HTTP 프록시.** Node.js 표준 모듈만 쓴다(npm 설치 없음).
+**한 포트에서 SOCKS5·HTTP 를 자동 감지**해 둘 다 서빙한다(첫 바이트: SOCKS5=0x05, HTTP=메서드).
 
 프록시를 거친 트래픽은 **이 프록시가 도는 호스트의 네트워크로 나간다**(egress = 그 호스트의 IP).
 접근 제어는 **신뢰 CIDR(무인증) · IP 화이트리스트 · 토큰 인증 · fail2ban** 을 조합해서 건다.
 
 ```
-[클라이언트] --(SOCKS5)--> [socks5-lite :1080] --호스트 네트워크--> 인터넷
+[클라이언트] --(SOCKS5 또는 HTTP)--> [socks5-lite :1080] --호스트 네트워크--> 인터넷
 ```
 
-- SOCKS5 **CONNECT** + **원격 DNS**(socks5h)
-- 토큰 인증(RFC 1929) · IP 화이트리스트(와일드카드/CIDR/정확) · fail2ban · 핫리로드
+- SOCKS5(CONNECT) + HTTP(CONNECT/평문) + **원격 DNS**
+- 토큰 인증 — SOCKS5는 user/pass(RFC 1929), HTTP는 `Proxy-Authorization: Basic`
+- IP 화이트리스트(와일드카드/CIDR/정확) · fail2ban · 핫리로드
 - 설정 없으면 **신뢰 CIDR 전용 + 무인증 + fail2ban on** 으로 동작
+
+> **브라우저 + 토큰**: Chromium 은 SOCKS 인증을 못 하지만 **HTTP 프록시 인증은 된다.**
+> 그래서 신뢰대역 밖의 자동화 기기는 **HTTP + 토큰**으로 붙는 게 가장 간단하다
+> (Playwright `proxy:{ server:'http://host:port', username, password }` 가 407 을 자동 처리).
 
 ---
 
@@ -83,11 +89,22 @@ node socks5.js          # 기본 0.0.0.0:1080
 ## 클라이언트 사용
 
 ```bash
+# SOCKS5
 curl --socks5-hostname <host>:1080 https://api.ipify.org             # 무인증(신뢰 대역)
 curl --socks5-hostname user:token@<host>:1080 https://api.ipify.org  # 토큰 인증
+
+# HTTP (같은 포트)
+curl -x http://<host>:1080 https://api.ipify.org                     # 무인증(신뢰 대역)
+curl -x http://user:token@<host>:1080 https://api.ipify.org          # 토큰 인증
 ```
 
-Playwright/patchright: `chromium.launch({ proxy: { server: 'socks5://<host>:1080' } })`
+Playwright/patchright:
+```js
+// 신뢰 대역(무인증) — SOCKS/HTTP 아무거나
+chromium.launch({ proxy: { server: 'socks5://<host>:1080' } })
+// 신뢰 대역 밖(토큰) — HTTP 로 (SOCKS 인증은 Chromium 미지원)
+chromium.launch({ proxy: { server: 'http://<host>:1080', username: 'user', password: '<token>' } })
+```
 
 ---
 
